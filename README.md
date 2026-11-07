@@ -60,17 +60,14 @@ In Supabase Dashboard → Authentication → Providers → Google:
 - Enable Google
 - Add your Google Client ID & Secret
 - Add redirect URLs:
-  - `https://<your-project>.supabase.co/auth/v1/callback`
-  - `http://localhost:3000/api/auth/callback`
-
+  
 ### 5. Run
 
 ```bash
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000)
-
+Open 
 ## Model Routing
 
 | Preference     | Behavior                                      |
