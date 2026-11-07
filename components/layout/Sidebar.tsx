@@ -2,10 +2,10 @@
 
 import { createClient } from "@/lib/supabase/client";
 import { useAppStore } from "@/lib/store";
-import { MessageSquarePlus, LogOut, User, MessageSquare } from "lucide-react";
+import { MessageSquarePlus, LogOut, User, MessageSquare, MoreHorizontal, Trash2, Loader2 } from "lucide-react";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
 import { formatRelativeTime } from "@/lib/utils";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import type { ChatSession } from "@/types";
 
 interface SidebarProps {
@@ -15,6 +15,9 @@ interface SidebarProps {
 
 export function Sidebar({ user, onClose }: SidebarProps) {
   const supabase = createClient();
+  const [openMenu, setOpenMenu] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState("");
   const {
     sessions,
     setSessions,
@@ -22,7 +25,7 @@ export function Sidebar({ user, onClose }: SidebarProps) {
     setCurrentSessionId,
     setMessages,
     clearChat,
-    modelPreference,
+    isStreaming,
   } = useAppStore();
 
   // Load sessions when user is available
@@ -93,6 +96,25 @@ export function Sidebar({ user, onClose }: SidebarProps) {
     }
   };
 
+  const handleDeleteSession = async (session: ChatSession) => {
+    if (!user || deletingId || isStreaming) return;
+    setDeletingId(session.id);
+    setDeleteError("");
+    try {
+      const { data, error } = await supabase.from("chat_sessions")
+        .delete().eq("id", session.id).eq("user_id", user.id).select("id");
+      if (error || !data?.length) throw new Error("Delete failed");
+      const state = useAppStore.getState();
+      setSessions(state.sessions.filter(item => item.id !== session.id));
+      if (state.currentSessionId === session.id) clearChat();
+      setOpenMenu(null);
+    } catch {
+      setDeleteError("Could not delete this chat. Please try again.");
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   // Group sessions
   const grouped = sessions.reduce(
     (acc, s) => {
@@ -138,18 +160,30 @@ export function Sidebar({ user, onClose }: SidebarProps) {
                 </p>
                 <div className="space-y-0.5">
                   {grouped[group].map((session) => (
-                    <button
-                      key={session.id}
-                      onClick={() => handleSelectSession(session)}
-                      className={`flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm transition ${
-                        currentSessionId === session.id
-                          ? "bg-primary/10 text-primary"
-                          : "hover:bg-muted"
-                      }`}
-                    >
-                      <MessageSquare className="h-4 w-4 shrink-0 opacity-60" />
-                      <span className="truncate">{session.title}</span>
-                    </button>
+                    <div key={session.id} className={`rounded-lg text-sm ${currentSessionId === session.id ? "bg-primary/10 text-primary" : "hover:bg-muted"}`}>
+                      <div className="flex items-center">
+                        <button onClick={() => handleSelectSession(session)} disabled={isStreaming}
+                          className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-2 text-left disabled:opacity-50">
+                          <MessageSquare className="h-4 w-4 shrink-0 opacity-60" />
+                          <span className="truncate">{session.title}</span>
+                        </button>
+                        <button type="button" aria-label={`Options for ${session.title}`} aria-expanded={openMenu === session.id}
+                          aria-controls={`chat-options-${session.id}`} onClick={() => { setOpenMenu(openMenu === session.id ? null : session.id); setDeleteError(""); }}
+                          className="mr-1 rounded-md p-2 hover:bg-background focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">
+                          <MoreHorizontal className="h-4 w-4" />
+                        </button>
+                      </div>
+                      {openMenu === session.id && (
+                        <div id={`chat-options-${session.id}`} className="px-2 pb-2" onKeyDown={event => { if (event.key === "Escape") setOpenMenu(null); }}>
+                          <button type="button" onClick={() => handleDeleteSession(session)} disabled={!!deletingId || isStreaming}
+                            className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-destructive hover:bg-destructive/10 disabled:opacity-50">
+                            {deletingId === session.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                            {deletingId === session.id ? "Deleting…" : "Delete chat"}
+                          </button>
+                          {deleteError && <p role="alert" className="px-2 py-1 text-xs text-destructive">{deleteError}</p>}
+                        </div>
+                      )}
+                    </div>
                   ))}
                 </div>
               </div>

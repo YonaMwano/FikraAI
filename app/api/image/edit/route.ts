@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import Client from "magic-hour";
+import { imageEditInput } from "@/lib/image-edit";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -19,19 +20,27 @@ export async function POST(req: NextRequest) {
     const imageUrl = body.imageUrl;
     const name = body.name || `Fikra-Edit-${Date.now()}`;
 
-    if (!prompt || !imageUrl) {
+    if (typeof prompt !== "string" || !prompt.trim() || typeof imageUrl !== "string" || !imageUrl) {
       return NextResponse.json(
         { error: "Both prompt and imageUrl are required" },
         { status: 400 }
       );
     }
 
+    let input: string | File;
+    try {
+      input = imageEditInput(imageUrl);
+    } catch {
+      return NextResponse.json({ error: "Use a PNG, JPEG, or WebP image under 10 MB, or an HTTPS image URL." }, { status: 400 });
+    }
     const client = new Client({ token: apiKey });
+    // Uploaded browser images are data URLs, not filesystem paths.
+    const source = await client.v1.files.uploadFile(input);
 
     const res = await client.v1.aiImageEditor.generate(
       {
         assets: {
-          imageFilePaths: [imageUrl],
+          imageFilePaths: [source],
         },
         name,
         model: "qwen-image-2.1",
@@ -49,14 +58,9 @@ export async function POST(req: NextRequest) {
     const editedUrl = res.downloads?.[0]?.url ?? null;
 
     if (!editedUrl) {
-      console.error("MagicHour edit response (no URL found):", JSON.stringify(res, null, 2));
       return NextResponse.json(
-        {
-          status: "processing",
-          message: "Image edit finished but no downloadable URL was returned.",
-          raw: res,
-        },
-        { status: 200 }
+        { error: "The image provider did not return an edited image. Please try again." },
+        { status: 502 }
       );
     }
 
@@ -66,14 +70,10 @@ export async function POST(req: NextRequest) {
       originalUrl: imageUrl,
       model: "qwen-image-2.1",
     });
-  } catch (error: any) {
-    console.error("Image edit error:", error);
+  } catch {
     return NextResponse.json(
-      {
-        error: error?.message || "Image edit failed",
-        details: String(error).slice(0, 400),
-      },
-      { status: 500 }
+      { error: "Image editing failed. Please try again." },
+      { status: 502 }
     );
   }
 }

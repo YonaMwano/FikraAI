@@ -220,7 +220,10 @@ export function ChatInput({ user }: ChatInputProps) {
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error("Image request failed");
+      if (!res.ok) {
+        updateLastMessage(data.error || "Image editing failed. Please try again.");
+        return;
+      }
 
       if (data.status === "completed" && data.imageUrl) {
         const msgs = useAppStore.getState().messages;
