@@ -9,10 +9,15 @@ export async function GET(request: Request) {
   if (code) {
     const supabase = await createClient();
     const { error } = await supabase.auth.exchangeCodeForSession(code);
+
     if (!error) {
+      // Successful login – redirect home
       return NextResponse.redirect(`${origin}${next}`);
     }
+
+    console.error("Auth callback error:", error.message);
   }
 
+  // Fallback
   return NextResponse.redirect(`${origin}/`);
 }

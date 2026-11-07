@@ -6,6 +6,7 @@ interface AppState {
   // UI
   isAuthModalOpen: boolean;
   isSidebarOpen: boolean;
+  isSettingsOpen: boolean;
   modelPreference: ModelPreference;
 
   // Chat
@@ -17,6 +18,7 @@ interface AppState {
   // Actions
   setAuthModalOpen: (open: boolean) => void;
   setSidebarOpen: (open: boolean) => void;
+  setSettingsOpen: (open: boolean) => void;
   setModelPreference: (model: ModelPreference) => void;
   setCurrentSessionId: (id: string | null) => void;
   setMessages: (messages: Message[]) => void;
@@ -29,9 +31,10 @@ interface AppState {
 
 export const useAppStore = create<AppState>()(
   persist(
-    (set, get) => ({
+    (set) => ({
       isAuthModalOpen: false,
       isSidebarOpen: false,
+      isSettingsOpen: false,
       modelPreference: "auto",
       currentSessionId: null,
       messages: [],
@@ -40,6 +43,7 @@ export const useAppStore = create<AppState>()(
 
       setAuthModalOpen: (open) => set({ isAuthModalOpen: open }),
       setSidebarOpen: (open) => set({ isSidebarOpen: open }),
+      setSettingsOpen: (open) => set({ isSettingsOpen: open }),
       setModelPreference: (model) => set({ modelPreference: model }),
       setCurrentSessionId: (id) => set({ currentSessionId: id }),
       setMessages: (messages) => set({ messages }),
@@ -65,7 +69,6 @@ export const useAppStore = create<AppState>()(
       name: "fikra-ui-store",
       partialize: (state) => ({
         modelPreference: state.modelPreference,
-        // Guest sessions can be partially persisted if needed
       }),
     }
   )

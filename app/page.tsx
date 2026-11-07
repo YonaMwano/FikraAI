@@ -8,29 +8,48 @@ import { EmptyState } from "@/components/chat/EmptyState";
 import { MessageList } from "@/components/chat/MessageList";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { AuthGateModal } from "@/components/auth/AuthGateModal";
+import { SettingsModal } from "@/components/layout/SettingsModal";
 import { useAppStore } from "@/lib/store";
 
 export default function HomePage() {
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const { isSidebarOpen, setSidebarOpen, isAuthModalOpen, messages } =
-    useAppStore();
+  const {
+    isSidebarOpen,
+    setSidebarOpen,
+    isAuthModalOpen,
+    setAuthModalOpen,
+    messages,
+  } = useAppStore();
   const supabase = createClient();
 
   useEffect(() => {
-    const getUser = async () => {
+    // Immediate session check
+    const init = async () => {
       const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      setUser(user);
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (session?.user) {
+        setUser(session.user);
+        setAuthModalOpen(false); // close any open auth modal
+      }
       setLoading(false);
     };
-    getUser();
+    init();
 
+    // Listen for auth changes (this fires after Google redirect)
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
+    } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED") {
+        setUser(session?.user ?? null);
+        setAuthModalOpen(false);
+      } else if (event === "SIGNED_OUT") {
+        setUser(null);
+      } else {
+        setUser(session?.user ?? null);
+      }
     });
 
     return () => subscription.unsubscribe();
@@ -52,10 +71,12 @@ export default function HomePage() {
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
+      {/* Desktop Sidebar */}
       <div className="hidden md:flex">
         <Sidebar user={user} />
       </div>
 
+      {/* Mobile Sidebar */}
       {isSidebarOpen && (
         <div className="fixed inset-0 z-40 md:hidden">
           <div
@@ -68,6 +89,7 @@ export default function HomePage() {
         </div>
       )}
 
+      {/* Main */}
       <div className="flex flex-1 flex-col">
         <Header user={user} onMenuClick={() => setSidebarOpen(true)} />
 
@@ -84,6 +106,7 @@ export default function HomePage() {
       </div>
 
       <AuthGateModal open={isAuthModalOpen} />
+      <SettingsModal user={user} />
     </div>
   );
 }

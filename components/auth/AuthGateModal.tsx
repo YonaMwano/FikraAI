@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/client";
 import { useAppStore } from "@/lib/store";
 import { Lock } from "lucide-react";
+import { useEffect } from "react";
 
 interface AuthGateModalProps {
   open: boolean;
@@ -11,6 +12,18 @@ interface AuthGateModalProps {
 export function AuthGateModal({ open }: AuthGateModalProps) {
   const { setAuthModalOpen } = useAppStore();
   const supabase = createClient();
+
+  // Auto-close if user somehow becomes logged in while modal is open
+  useEffect(() => {
+    if (!open) return;
+    const check = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        setAuthModalOpen(false);
+      }
+    };
+    check();
+  }, [open]);
 
   if (!open) return null;
 

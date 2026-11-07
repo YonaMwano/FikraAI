@@ -1,13 +1,21 @@
 import { createClient } from "@/lib/supabase/server";
 import { NextRequest } from "next/server";
 
-export const runtime = "edge";
+export const runtime = "nodejs";
+export const maxDuration = 60;
 
-const GROQ_API_KEY = process.env.GROQ_API_KEY!;
+const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 
 export async function POST(req: NextRequest) {
   try {
+    if (!GROQ_API_KEY) {
+      return new Response(
+        JSON.stringify({ error: "GROQ_API_KEY is not configured on the server" }),
+        { status: 500, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
     const body = await req.json();
     const {
       messages,
@@ -16,19 +24,19 @@ export async function POST(req: NextRequest) {
       imageBase64,
     } = body;
 
-    if (!messages || !Array.isArray(messages)) {
+    if (!messages || !Array.isArray(messages) || messages.length === 0) {
       return new Response(JSON.stringify({ error: "Messages required" }), {
         status: 400,
+        headers: { "Content-Type": "application/json" },
       });
     }
 
-    // Determine which Groq model to use
-    let model = "openai/gpt-oss-120b"; // default text
+    // Determine model
+    let model = "openai/gpt-oss-120b";
     let finalMessages = [...messages];
 
-    // Auto routing or forced vision
     const hasImage =
-      imageBase64 ||
+      !!imageBase64 ||
       messages.some(
         (m: any) =>
           m.image_url ||
@@ -40,7 +48,7 @@ export async function POST(req: NextRequest) {
       model = "qwen/qwen3.8-27b";
     }
 
-    // If image is provided as base64, convert last user message to multimodal
+    // Convert base64 image into multimodal format if present
     if (imageBase64 && finalMessages.length > 0) {
       const last = finalMessages[finalMessages.length - 1];
       if (last.role === "user") {
@@ -49,7 +57,7 @@ export async function POST(req: NextRequest) {
           content: [
             {
               type: "text",
-              text: last.content || "Describe this image in detail.",
+              text: typeof last.content === "string" ? last.content : "Describe this image.",
             },
             {
               type: "image_url",
@@ -64,7 +72,6 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Call Groq
     const response = await fetch(GROQ_URL, {
       method: "POST",
       headers: {
@@ -81,15 +88,18 @@ export async function POST(req: NextRequest) {
     });
 
     if (!response.ok) {
-      const err = await response.text();
-      console.error("Groq error:", err);
+      const errText = await response.text();
+      console.error("Groq API error:", response.status, errText);
       return new Response(
-        JSON.stringify({ error: "Failed to reach AI model", details: err }),
-        { status: 500 }
+        JSON.stringify({
+          error: "Failed to reach AI model",
+          details: errText.slice(0, 500),
+        }),
+        { status: 500, headers: { "Content-Type": "application/json" } }
       );
     }
 
-    // Stream the response back
+    // Stream response
     const stream = new ReadableStream({
       async start(controller) {
         const reader = response.body?.getReader();
@@ -106,7 +116,7 @@ export async function POST(req: NextRequest) {
             const { done, value } = await reader.read();
             if (done) break;
 
-            const chunk = decoder.decode(value);
+            const chunk = decoder.decode(value, { stream: true });
             const lines = chunk.split("\n").filter((line) => line.trim() !== "");
 
             for (const line of lines) {
@@ -126,13 +136,13 @@ export async function POST(req: NextRequest) {
                     );
                   }
                 } catch {
-                  // skip invalid json
+                  // skip invalid json chunks
                 }
               }
             }
           }
 
-          // Optionally persist the assistant message if logged in + sessionId
+          // Persist assistant message when logged in
           if (sessionId && fullContent) {
             try {
               const supabase = await createClient();
@@ -148,7 +158,7 @@ export async function POST(req: NextRequest) {
                   model_used: model,
                 });
 
-                // Update session title if it is still "New Chat"
+                // Auto-title the chat
                 const { data: session } = await supabase
                   .from("chat_sessions")
                   .select("title")
@@ -156,10 +166,13 @@ export async function POST(req: NextRequest) {
                   .single();
 
                 if (session?.title === "New Chat") {
+                  const firstUserMsg = messages.find((m: any) => m.role === "user");
                   const title =
-                    messages
-                      .find((m: any) => m.role === "user")
-                      ?.content?.slice(0, 60) || "New Chat";
+                    (typeof firstUserMsg?.content === "string"
+                      ? firstUserMsg.content
+                      : "New Chat"
+                    ).slice(0, 60) || "New Chat";
+
                   await supabase
                     .from("chat_sessions")
                     .update({ title })
@@ -172,7 +185,9 @@ export async function POST(req: NextRequest) {
           }
 
           controller.enqueue(
-            new TextEncoder().encode(`data: ${JSON.stringify({ done: true, model })}\n\n`)
+            new TextEncoder().encode(
+              `data: ${JSON.stringify({ done: true, model })}\n\n`
+            )
           );
         } catch (e) {
           console.error("Stream error:", e);
@@ -185,7 +200,7 @@ export async function POST(req: NextRequest) {
     return new Response(stream, {
       headers: {
         "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
+        "Cache-Control": "no-cache, no-transform",
         Connection: "keep-alive",
       },
     });
@@ -193,7 +208,7 @@ export async function POST(req: NextRequest) {
     console.error("Chat API error:", error);
     return new Response(
       JSON.stringify({ error: error.message || "Internal error" }),
-      { status: 500 }
+      { status: 500, headers: { "Content-Type": "application/json" } }
     );
   }
 }
