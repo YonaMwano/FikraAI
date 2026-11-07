@@ -175,7 +175,7 @@ export function ChatInput({ user }: ChatInputProps) {
       } else {
         updateLastMessage(
           data.message ||
-            "Image generation is processing. Please try again in a moment."
+            "Image is still being generated. Please wait a few seconds and try again, or check your MagicHour dashboard."
         );
       }
     } catch (err) {
@@ -239,7 +239,8 @@ export function ChatInput({ user }: ChatInputProps) {
         }
       } else {
         updateLastMessage(
-          data.message || "Image edit is processing. Please try again shortly."
+          data.message ||
+            "Image edit is still processing. Please wait a few seconds and try again."
         );
       }
     } catch (err) {

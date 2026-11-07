@@ -1,21 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Client } from "magic-hour";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-const MAGIC_HOUR_API_KEY = process.env.MAGIC_HOUR_API_KEY;
-
 export async function POST(req: NextRequest) {
   try {
-    if (!MAGIC_HOUR_API_KEY) {
+    const apiKey = process.env.MAGIC_HOUR_API_KEY;
+    if (!apiKey) {
       return NextResponse.json(
         { error: "MAGIC_HOUR_API_KEY is not configured" },
         { status: 500 }
       );
     }
 
-    const { prompt, aspectRatio = "16:9", name = "Fikra AI Image" } =
-      await req.json();
+    const body = await req.json();
+    const prompt = body.prompt;
+    const aspectRatio = body.aspectRatio || "16:9";
+    const name = body.name || `Fikra-${Date.now()}`;
 
     if (!prompt || typeof prompt !== "string") {
       return NextResponse.json(
@@ -24,77 +26,70 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Create the image generation job
-    const createRes = await fetch(
-      "https://api.magichour.ai/v1/ai-image-generator",
+    const client = new Client({ token: apiKey });
+
+    // Use the official SDK with waitForCompletion so we get the final image
+    const res = await client.v1.aiImageGenerator.generate(
       {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${MAGIC_HOUR_API_KEY}`,
-          "Content-Type": "application/json",
+        aspectRatio,
+        imageCount: 1,
+        model: "z-image-turbo",
+        name,
+        resolution: "640px",
+        style: {
+          prompt,
+          tool: "general",
         },
-        body: JSON.stringify({
-          aspect_ratio: aspectRatio,
-          image_count: 1,
-          model: "z-image-turbo",
-          name,
-          resolution: "640px",
-          style: {
-            prompt,
-            tool: "general",
-          },
-        }),
+      },
+      {
+        waitForCompletion: true,
+        // We don't need to download to disk on the server
+        downloadOutputs: false,
       }
     );
 
-    const createData = await createRes.json();
+    // The SDK result shape can vary slightly between versions.
+    // Try several common locations for the final image URL.
+    let imageUrl: string | null = null;
 
-    if (!createRes.ok) {
-      console.error("MagicHour create error:", createData);
+    if (res?.downloads?.[0]?.url) {
+      imageUrl = res.downloads[0].url;
+    } else if (res?.images?.[0]?.url) {
+      imageUrl = res.images[0].url;
+    } else if (Array.isArray(res?.output) && res.output[0]) {
+      imageUrl = typeof res.output[0] === "string" ? res.output[0] : res.output[0].url;
+    } else if (res?.url) {
+      imageUrl = res.url;
+    } else if (res?.data?.downloads?.[0]?.url) {
+      imageUrl = res.data.downloads[0].url;
+    } else if (res?.data?.images?.[0]?.url) {
+      imageUrl = res.data.images[0].url;
+    }
+
+    if (!imageUrl) {
+      console.error("MagicHour response (no URL found):", JSON.stringify(res, null, 2));
       return NextResponse.json(
         {
-          error: "Image generation failed",
-          details: createData?.message || createData?.error || JSON.stringify(createData).slice(0, 300),
+          status: "processing",
+          message: "Image generation finished but no downloadable URL was returned.",
+          raw: res,
         },
-        { status: 500 }
+        { status: 200 }
       );
     }
 
-    // Try to extract a direct URL if the API returns one immediately
-    let imageUrl: string | null = null;
-
-    if (createData?.downloads?.[0]?.url) {
-      imageUrl = createData.downloads[0].url;
-    } else if (createData?.images?.[0]?.url) {
-      imageUrl = createData.images[0].url;
-    } else if (Array.isArray(createData?.output) && createData.output[0]) {
-      imageUrl = createData.output[0];
-    } else if (createData?.url) {
-      imageUrl = createData.url;
-    }
-
-    if (imageUrl) {
-      return NextResponse.json({
-        status: "completed",
-        imageUrl,
-        model: "z-image-turbo",
-      });
-    }
-
-    // If we only got a job/project id, return processing so the UI can show the generating state
-    const jobId = createData?.id || createData?.project_id || createData?.job_id;
-
     return NextResponse.json({
-      status: "processing",
-      jobId,
-      message:
-        "Image is being generated. MagicHour returned a job ID. For production, add polling or use their SDK with waitForCompletion.",
-      raw: createData,
+      status: "completed",
+      imageUrl,
+      model: "z-image-turbo",
     });
   } catch (error: any) {
-    console.error("Image generate route error:", error);
+    console.error("Image generate error:", error);
     return NextResponse.json(
-      { error: error.message || "Internal server error" },
+      {
+        error: error?.message || "Image generation failed",
+        details: String(error).slice(0, 400),
+      },
       { status: 500 }
     );
   }
