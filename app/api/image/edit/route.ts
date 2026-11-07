@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { Client } from "magic-hour";
+import Client from "magic-hour";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -46,21 +46,7 @@ export async function POST(req: NextRequest) {
       }
     );
 
-    let editedUrl: string | null = null;
-
-    if (res?.downloads?.[0]?.url) {
-      editedUrl = res.downloads[0].url;
-    } else if (res?.images?.[0]?.url) {
-      editedUrl = res.images[0].url;
-    } else if (Array.isArray(res?.output) && res.output[0]) {
-      editedUrl = typeof res.output[0] === "string" ? res.output[0] : res.output[0].url;
-    } else if (res?.url) {
-      editedUrl = res.url;
-    } else if (res?.data?.downloads?.[0]?.url) {
-      editedUrl = res.data.downloads[0].url;
-    } else if (res?.data?.images?.[0]?.url) {
-      editedUrl = res.data.images[0].url;
-    }
+    const editedUrl = res.downloads?.[0]?.url ?? null;
 
     if (!editedUrl) {
       console.error("MagicHour edit response (no URL found):", JSON.stringify(res, null, 2));

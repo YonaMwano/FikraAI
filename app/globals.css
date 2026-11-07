@@ -63,3 +63,6 @@
   width: 100%;
   overflow-x: auto;
 }
+
+/* Keep the conversation in its own scroll area, including with mobile keyboards. */
+html, body { height: 100%; overflow: hidden; }

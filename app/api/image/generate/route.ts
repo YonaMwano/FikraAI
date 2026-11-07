@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { Client } from "magic-hour";
+import Client from "magic-hour";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -48,23 +48,7 @@ export async function POST(req: NextRequest) {
       }
     );
 
-    // The SDK result shape can vary slightly between versions.
-    // Try several common locations for the final image URL.
-    let imageUrl: string | null = null;
-
-    if (res?.downloads?.[0]?.url) {
-      imageUrl = res.downloads[0].url;
-    } else if (res?.images?.[0]?.url) {
-      imageUrl = res.images[0].url;
-    } else if (Array.isArray(res?.output) && res.output[0]) {
-      imageUrl = typeof res.output[0] === "string" ? res.output[0] : res.output[0].url;
-    } else if (res?.url) {
-      imageUrl = res.url;
-    } else if (res?.data?.downloads?.[0]?.url) {
-      imageUrl = res.data.downloads[0].url;
-    } else if (res?.data?.images?.[0]?.url) {
-      imageUrl = res.data.images[0].url;
-    }
+    const imageUrl = res.downloads?.[0]?.url ?? null;
 
     if (!imageUrl) {
       console.error("MagicHour response (no URL found):", JSON.stringify(res, null, 2));

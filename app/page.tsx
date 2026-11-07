@@ -55,6 +55,19 @@ export default function HomePage() {
     return () => subscription.unsubscribe();
   }, []);
 
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    const resize = () => document.documentElement.style.setProperty("--chat-height", `${viewport?.height ?? window.innerHeight}px`);
+    resize();
+    viewport?.addEventListener("resize", resize);
+    window.addEventListener("resize", resize);
+    return () => {
+      viewport?.removeEventListener("resize", resize);
+      window.removeEventListener("resize", resize);
+      document.documentElement.style.removeProperty("--chat-height");
+    };
+  }, []);
+
   const handleEditImage = (url: string) => {
     if (typeof window !== "undefined" && (window as any).__fikraSetEditImage) {
       (window as any).__fikraSetEditImage(url);
@@ -70,7 +83,7 @@ export default function HomePage() {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-background">
+    <div className="flex h-[var(--chat-height,100dvh)] overflow-hidden bg-background">
       {/* Desktop Sidebar */}
       <div className="hidden md:flex">
         <Sidebar user={user} />
@@ -90,16 +103,16 @@ export default function HomePage() {
       )}
 
       {/* Main */}
-      <div className="flex flex-1 flex-col">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <Header user={user} onMenuClick={() => setSidebarOpen(true)} />
 
-        <main className="relative flex flex-1 flex-col overflow-hidden">
+        <main className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           {messages.length === 0 ? (
             <EmptyState />
           ) : (
             <MessageList user={user} onEditImage={handleEditImage} />
           )}
-          <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-background via-background to-transparent p-4 pb-6 pt-12">
+          <div className="shrink-0 border-t border-border/50 bg-background px-3 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4">
             <ChatInput user={user} />
           </div>
         </main>
