@@ -50,3 +50,16 @@
 ::-webkit-scrollbar-thumb:hover {
   background: hsl(var(--muted-foreground) / 0.5);
 }
+
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/* Extra safety for markdown tables on mobile */
+.prose table {
+  display: block;
+  width: 100%;
+  overflow-x: auto;
+}

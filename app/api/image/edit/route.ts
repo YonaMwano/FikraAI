@@ -3,10 +3,17 @@ import { NextRequest, NextResponse } from "next/server";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-const MAGIC_HOUR_API_KEY = process.env.MAGIC_HOUR_API_KEY!;
+const MAGIC_HOUR_API_KEY = process.env.MAGIC_HOUR_API_KEY;
 
 export async function POST(req: NextRequest) {
   try {
+    if (!MAGIC_HOUR_API_KEY) {
+      return NextResponse.json(
+        { error: "MAGIC_HOUR_API_KEY is not configured" },
+        { status: 500 }
+      );
+    }
+
     const { prompt, imageUrl, name = "Fikra AI Image Edit" } = await req.json();
 
     if (!prompt || !imageUrl) {
@@ -16,8 +23,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // MagicHour AI Image Editor
-    const response = await fetch(
+    const createRes = await fetch(
       "https://api.magichour.ai/v1/ai-image-editor",
       {
         method: "POST",
@@ -27,7 +33,8 @@ export async function POST(req: NextRequest) {
         },
         body: JSON.stringify({
           assets: {
-            image_file_paths: [imageUrl], // or image urls depending on API
+            // MagicHour accepts either file paths or publicly accessible URLs
+            image_file_paths: [imageUrl],
           },
           name,
           model: "qwen-image-2.1",
@@ -39,46 +46,47 @@ export async function POST(req: NextRequest) {
       }
     );
 
-    if (!response.ok) {
-      const errText = await response.text();
-      console.error("MagicHour edit error:", errText);
+    const createData = await createRes.json();
+
+    if (!createRes.ok) {
+      console.error("MagicHour edit error:", createData);
       return NextResponse.json(
-        { error: "Image edit failed", details: errText },
+        {
+          error: "Image edit failed",
+          details: createData?.message || createData?.error || JSON.stringify(createData).slice(0, 300),
+        },
         { status: 500 }
       );
     }
 
-    const data = await response.json();
-
     let editedUrl: string | null = null;
 
-    if (data?.downloads?.[0]?.url) {
-      editedUrl = data.downloads[0].url;
-    } else if (data?.images?.[0]?.url) {
-      editedUrl = data.images[0].url;
-    } else if (data?.output?.[0]) {
-      editedUrl = data.output[0];
-    } else if (data?.id) {
+    if (createData?.downloads?.[0]?.url) {
+      editedUrl = createData.downloads[0].url;
+    } else if (createData?.images?.[0]?.url) {
+      editedUrl = createData.images[0].url;
+    } else if (Array.isArray(createData?.output) && createData.output[0]) {
+      editedUrl = createData.output[0];
+    } else if (createData?.url) {
+      editedUrl = createData.url;
+    }
+
+    if (editedUrl) {
       return NextResponse.json({
-        status: "processing",
-        jobId: data.id,
-        message: "Image is being edited. Please wait...",
+        status: "completed",
+        imageUrl: editedUrl,
+        originalUrl: imageUrl,
+        model: "qwen-image-2.1",
       });
     }
 
-    if (!editedUrl) {
-      return NextResponse.json({
-        status: "unknown",
-        raw: data,
-        message: "Edit started but no direct URL returned yet.",
-      });
-    }
+    const jobId = createData?.id || createData?.project_id || createData?.job_id;
 
     return NextResponse.json({
-      status: "completed",
-      imageUrl: editedUrl,
-      originalUrl: imageUrl,
-      model: "qwen-image-2.1",
+      status: "processing",
+      jobId,
+      message: "Image edit is processing. Add polling for production use.",
+      raw: createData,
     });
   } catch (error: any) {
     console.error("Image edit route error:", error);

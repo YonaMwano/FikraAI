@@ -47,8 +47,19 @@ export function ChatInput({ user }: ChatInputProps) {
       setEditingImageUrl(url);
       setPendingImage(url);
     };
+
+    // Listen for "Edit" button on messages – put text back into input
+    const onEditMessage = (e: any) => {
+      if (e.detail) {
+        setValue(e.detail);
+        textareaRef.current?.focus();
+      }
+    };
+    window.addEventListener("fikra-edit-message", onEditMessage);
+
     return () => {
       delete (window as any).__fikraSetEditImage;
+      window.removeEventListener("fikra-edit-message", onEditMessage);
     };
   }, []);
 
