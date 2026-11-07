@@ -87,20 +87,34 @@ export function ChatInput({ user }: ChatInputProps) {
     }
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     if (!file.type.startsWith("image/")) {
       alert("Please select an image file");
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => {
-      setPendingImage(reader.result as string);
-      setEditingImageUrl(null);
-    };
-    reader.readAsDataURL(file);
     e.target.value = "";
+    try {
+      // Keep uploaded image data below the serverless request payload limit.
+      const bitmap = await createImageBitmap(file);
+      try {
+        const scale = Math.min(1, 1600 / Math.max(bitmap.width, bitmap.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+        canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+        const context = canvas.getContext("2d");
+        if (!context) throw new Error("Image conversion unavailable");
+        context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+        const image = canvas.toDataURL("image/png");
+        setPendingImage(image.length <= 3 * 1024 * 1024 ? image : canvas.toDataURL("image/jpeg", 0.85));
+        setEditingImageUrl(null);
+      } finally {
+        bitmap.close();
+      }
+    } catch {
+      alert("This image could not be opened. Please choose a PNG, JPEG, or WebP image.");
+    }
   };
 
   const ensureSession = async (): Promise<string> => {
@@ -219,8 +233,26 @@ export function ChatInput({ user }: ChatInputProps) {
           name: `Fikra-Edit-${Date.now()}`,
         }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error("Image request failed");
+      let data = await res.json();
+      if (!res.ok) {
+        updateLastMessage(data.error || "Image editing failed. Please try again.");
+        return;
+      }
+
+      if (data.status === "processing" && data.job) {
+        const job = data.job;
+        const deadline = Date.now() + 15 * 60 * 1000;
+        while (data.status === "processing" && Date.now() < deadline) {
+          await new Promise(resolve => setTimeout(resolve, 3000));
+          const progress = await fetch(`/api/image/edit?job=${encodeURIComponent(job)}`, { cache: "no-store" });
+          if (progress.status === 503 || progress.status === 429) continue;
+          data = await progress.json();
+          if (!progress.ok) {
+            updateLastMessage(data.error || "Image editing failed. Please try again.");
+            return;
+          }
+        }
+      }
 
       if (data.status === "completed" && data.imageUrl) {
         const msgs = useAppStore.getState().messages;
@@ -247,10 +279,12 @@ export function ChatInput({ user }: ChatInputProps) {
             metadata: { original_url: data.originalUrl || imageUrl },
           });
         }
+        setEditingImageUrl(null);
+        setPendingImage(null);
       } else {
         updateLastMessage(
           data.message ||
-            "Image edit is still processing. Please wait a few seconds and try again."
+            "This image edit is taking longer than expected. Please try again later."
         );
       }
     } catch (err) {
@@ -258,8 +292,6 @@ export function ChatInput({ user }: ChatInputProps) {
       updateLastMessage("Sorry, image editing failed. Please try again.");
     } finally {
       setIsStreaming(false);
-      setEditingImageUrl(null);
-      setPendingImage(null);
     }
   };
 
@@ -321,6 +353,10 @@ export function ChatInput({ user }: ChatInputProps) {
   // MAIN SEND
   const handleSend = async () => {
     if ((!value.trim() && !pendingImage) || routing || useAppStore.getState().isStreaming) return;
+    if (modelPreference === "image-edit" && !pendingImage && !editingImageUrl) {
+      alert("Attach the image you want to edit, then describe the changes.");
+      return;
+    }
     const text = value.trim();
     setRouting(true);
     setMenuOpen(false);

@@ -1,5 +1,7 @@
 "use client";
 
+import { Children, isValidElement, useState, type ReactNode } from "react";
+import { Check, Copy } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
@@ -7,6 +9,42 @@ import { cn } from "@/lib/utils";
 interface MarkdownProps {
   content: string;
   className?: string;
+}
+
+function codeText(node: ReactNode): string {
+  return Children.toArray(node).map(child => {
+    if (typeof child === "string" || typeof child === "number") return String(child);
+    if (isValidElement<{ children?: ReactNode }>(child)) return codeText(child.props.children);
+    return "";
+  }).join("");
+}
+
+function CodeBlock({ children }: { children: ReactNode }) {
+  const [copied, setCopied] = useState(false);
+  const [error, setError] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(codeText(children));
+      setCopied(true);
+      setError(false);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setError(true);
+    }
+  };
+  return (
+    <div className="mb-3 min-w-0 overflow-hidden rounded-lg border border-border bg-muted/50">
+      <div className="flex items-center justify-end border-b border-border px-3 py-1.5">
+        <button type="button" onClick={copy} aria-label={copied ? "Code copied" : "Copy code"}
+          className="flex items-center gap-1.5 rounded px-2 py-1 text-xs text-muted-foreground hover:bg-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">
+          {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+          {copied ? "Copied" : "Copy code"}
+        </button>
+      </div>
+      {error && <p role="status" className="px-3 text-xs text-destructive">Unable to copy. Select the code and copy manually.</p>}
+      <pre className="m-0 max-w-full overflow-x-auto p-3 text-xs [&>code]:bg-transparent [&>code]:p-0">{children}</pre>
+    </div>
+  );
 }
 
 export function Markdown({ content, className }: MarkdownProps) {
@@ -50,32 +88,12 @@ export function Markdown({ content, className }: MarkdownProps) {
           em: ({ children }) => <em className="italic">{children}</em>,
 
           // Code
-          code: ({ className, children, ...props }) => {
-            const isBlock = className?.includes("language-");
-            if (isBlock) {
-              return (
-                <code
-                  className="block overflow-x-auto rounded-lg bg-black/10 p-3 text-xs dark:bg-white/10"
-                  {...props}
-                >
-                  {children}
-                </code>
-              );
-            }
-            return (
-              <code
-                className="rounded bg-black/10 px-1.5 py-0.5 text-[13px] dark:bg-white/10"
-                {...props}
-              >
-                {children}
-              </code>
-            );
-          },
-          pre: ({ children }) => (
-            <pre className="mb-3 max-w-full overflow-x-auto rounded-lg bg-black/10 p-0 dark:bg-white/10">
+          code: ({ className, children }) => (
+            <code className={cn("rounded bg-black/10 px-1.5 py-0.5 text-[13px] dark:bg-white/10", className)}>
               {children}
-            </pre>
+            </code>
           ),
+          pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
 
           // Tables (GFM)
           table: ({ children }) => (
