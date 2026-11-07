@@ -13,6 +13,8 @@ import {
 import { useAppStore } from "@/lib/store";
 import { createClient } from "@/lib/supabase/client";
 import { generateId } from "@/lib/utils";
+import { detectIntent, type ChatIntent } from "@/lib/intent";
+import { readChatStream } from "@/lib/chat-stream";
 import type { Message } from "@/types";
 
 interface ChatInputProps {
@@ -21,6 +23,8 @@ interface ChatInputProps {
 
 export function ChatInput({ user }: ChatInputProps) {
   const [value, setValue] = useState("");
+  const [routing, setRouting] = useState(false);
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [pendingImage, setPendingImage] = useState<string | null>(null);
   const [editingImageUrl, setEditingImageUrl] = useState<string | null>(null);
@@ -28,6 +32,7 @@ export function ChatInput({ user }: ChatInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const {
+    isStreaming,
     setAuthModalOpen,
     modelPreference,
     currentSessionId,
@@ -51,7 +56,10 @@ export function ChatInput({ user }: ChatInputProps) {
     // Listen for "Edit" button on messages – put text back into input
     const onEditMessage = (e: any) => {
       if (e.detail) {
-        setValue(e.detail);
+        setValue(e.detail.content);
+        setEditingMessageId(e.detail.id);
+        setEditingImageUrl(null);
+        setPendingImage(e.detail.imageUrl || null);
         textareaRef.current?.focus();
       }
     };
@@ -148,6 +156,7 @@ export function ChatInput({ user }: ChatInputProps) {
         body: JSON.stringify({ prompt, name: `Fikra-${Date.now()}` }),
       });
       const data = await res.json();
+      if (!res.ok) throw new Error("Image request failed");
 
       if (data.status === "completed" && data.imageUrl) {
         const msgs = useAppStore.getState().messages;
@@ -211,6 +220,7 @@ export function ChatInput({ user }: ChatInputProps) {
         }),
       });
       const data = await res.json();
+      if (!res.ok) throw new Error("Image request failed");
 
       if (data.status === "completed" && data.imageUrl) {
         const msgs = useAppStore.getState().messages;
@@ -254,7 +264,7 @@ export function ChatInput({ user }: ChatInputProps) {
   };
 
   // DOCUMENT GENERATION
-  const handleDocumentGen = async (prompt: string, sessionId: string) => {
+  const handleDocumentGen = async (prompt: string, sessionId: string, format: ChatIntent["format"], history: Message[]) => {
     setIsStreaming(true);
     const assistantId = generateId();
     addMessage({ id: assistantId, role: "assistant", content: "" });
@@ -268,44 +278,19 @@ export function ChatInput({ user }: ChatInputProps) {
             {
               role: "system",
               content:
-                "You are a professional document writer. Generate clean, well-structured content only.",
+                `You are a professional document writer. Return only the finished document in Markdown: a clear title, logical headings, concise paragraphs and well-structured tables where useful. No chat preamble, no code fences, no print instructions, no artificial page breaks or empty filler. Requested file format: ${format}. For spreadsheets, put the main data in GFM tables with clear column headers, units and numeric values. Use the conversation to populate the document; do not invent facts or claim unavailable data is verified.`,
             },
+            ...history.slice(-12).map(m => ({ role: m.role, content: m.content })),
             { role: "user", content: prompt },
           ],
           modelPreference: "auto",
-          sessionId,
         }),
       });
       if (!res.ok) throw new Error("Failed");
 
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error("No stream");
-
-      const decoder = new TextDecoder();
-      let full = "";
-      while (true) {
-        const { done, value: chunk } = await reader.read();
-        if (done) break;
-        const textChunk = decoder.decode(chunk);
-        const lines = textChunk.split("\n").filter((l) => l.trim());
-        for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            try {
-              const data = JSON.parse(line.slice(6));
-              if (data.content) {
-                full += data.content;
-                updateLastMessage(full);
-              }
-            } catch {}
-          }
-        }
-      }
-
-      const docName = lowerIncludes(prompt, "proposal")
-        ? "Business_Proposal.md"
-        : lowerIncludes(prompt, "report")
-        ? "Report.md"
-        : "Document.md";
+      const full = await readChatStream(res, updateLastMessage);
+      const title = full.split("\n").find(line => line.trim())?.replace(/^#+\s*/, "").replace(/[^\p{L}\p{N} _-]/gu, "").trim().slice(0, 70) || "Document";
+      const docName = `${title}.${format}`;
 
       const msgs = useAppStore.getState().messages;
       setMessages(
@@ -333,45 +318,31 @@ export function ChatInput({ user }: ChatInputProps) {
     }
   };
 
-  function lowerIncludes(text: string, word: string) {
-    return text.toLowerCase().includes(word);
-  }
-
   // MAIN SEND
   const handleSend = async () => {
-    if ((!value.trim() && !pendingImage) || useAppStore.getState().isStreaming)
-      return;
-
+    if ((!value.trim() && !pendingImage) || routing || useAppStore.getState().isStreaming) return;
     const text = value.trim();
-    setValue("");
+    setRouting(true);
     setMenuOpen(false);
-
-    const sessionId = await ensureSession();
-
-    const lower = text.toLowerCase();
-    const isImageGenIntent =
-      modelPreference === "image-gen" ||
-      lower.startsWith("generate an image") ||
-      lower.startsWith("create an image") ||
-      lower.startsWith("draw ") ||
-      lower.includes("generate image of");
-
-    const isImageEditIntent =
-      modelPreference === "image-edit" ||
-      (pendingImage &&
-        (lower.includes("edit") ||
-          lower.includes("remove") ||
-          lower.includes("change") ||
-          lower.includes("replace") ||
-          lower.includes("make it")));
-
-    const isDocumentIntent =
-      lower.includes("write a") &&
-      (lower.includes("document") ||
-        lower.includes("proposal") ||
-        lower.includes("report") ||
-        lower.includes("pdf") ||
-        lower.includes("docx"));
+    let intent = detectIntent(text, Boolean(pendingImage));
+    const history = messages;
+    try {
+      const response = await fetch("/api/intent", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, history: history.slice(-6), hasImage: Boolean(pendingImage) }),
+      });
+      if (response.ok) intent = await response.json();
+    } catch { /* Local detection remains available if classification is unavailable. */ }
+    if (intent.action === "chat" && modelPreference === "image-gen" && !pendingImage) intent.action = "image-generate";
+    if (pendingImage && (editingImageUrl || modelPreference === "image-edit")) intent.action = "image-edit";
+    const prompt = intent.prompt || text;
+    let sessionId: string;
+    try { sessionId = await ensureSession(); }
+    catch { setRouting(false); return; }
+    setValue("");
+    setEditingMessageId(null);
+    setIsStreaming(true);
+    setRouting(false);
 
     const userMsg: Message = {
       id: generateId(),
@@ -380,30 +351,32 @@ export function ChatInput({ user }: ChatInputProps) {
       image_url: pendingImage || undefined,
     };
     addMessage(userMsg);
-    await persistUserMessage(sessionId, userMsg);
+    try { await persistUserMessage(sessionId, userMsg); } catch { /* Continue the response if chat history is temporarily unavailable. */ }
 
-    if (isImageGenIntent && !pendingImage) {
-      await handleImageGen(text, sessionId);
+    if (intent.action === "image-generate" && !pendingImage) {
+      await handleImageGen(prompt, sessionId);
       return;
     }
 
-    if (isImageEditIntent && (pendingImage || editingImageUrl)) {
+    if (intent.action === "image-edit" && (pendingImage || editingImageUrl)) {
       await handleImageEdit(
-        text || "Improve this image",
+        prompt || "Improve this image",
         pendingImage || editingImageUrl!,
         sessionId
       );
       return;
     }
 
-    if (isDocumentIntent) {
-      await handleDocumentGen(text, sessionId);
+    if (intent.action === "document") {
+      await handleDocumentGen(prompt, sessionId, intent.format, history);
+      setPendingImage(null);
+      setEditingImageUrl(null);
       return;
     }
 
     // Default text / vision
     const apiMessages = [
-      ...messages.map((m) => ({ role: m.role, content: m.content })),
+      ...history.map((m) => ({ role: m.role, content: m.content })),
       { role: "user", content: userMsg.content },
     ];
 
@@ -424,28 +397,7 @@ export function ChatInput({ user }: ChatInputProps) {
       });
       if (!res.ok) throw new Error("Failed");
 
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error("No stream");
-
-      const decoder = new TextDecoder();
-      let full = "";
-      while (true) {
-        const { done, value: chunk } = await reader.read();
-        if (done) break;
-        const textChunk = decoder.decode(chunk);
-        const lines = textChunk.split("\n").filter((l) => l.trim());
-        for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            try {
-              const data = JSON.parse(line.slice(6));
-              if (data.content) {
-                full += data.content;
-                updateLastMessage(full);
-              }
-            } catch {}
-          }
-        }
-      }
+      await readChatStream(res, updateLastMessage);
     } catch (err) {
       console.error(err);
       updateLastMessage("Sorry, something went wrong. Please try again.");
@@ -456,8 +408,19 @@ export function ChatInput({ user }: ChatInputProps) {
     }
   };
 
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (el) { el.style.height = "auto"; el.style.height = `${Math.min(el.scrollHeight, 160)}px`; }
+  }, [value]);
+
   return (
     <div className="mx-auto w-full max-w-3xl">
+      {editingMessageId && (
+        <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
+          Editing your question · resend your changes
+          <button onClick={() => { setEditingMessageId(null); setValue(""); setPendingImage(null); }} className="p-2" aria-label="Cancel editing"><X className="h-4 w-4" /></button>
+        </div>
+      )}
       {pendingImage && (
         <div className="mb-3 flex items-center gap-3 rounded-xl border border-border bg-muted/50 p-2">
           <img
@@ -529,9 +492,9 @@ export function ChatInput({ user }: ChatInputProps) {
                 : "Ask Fikra AI…"
             }
             rows={1}
-            className="max-h-40 flex-1 resize-none bg-transparent py-2.5 text-[15px] outline-none placeholder:text-muted-foreground"
+            className="max-h-40 min-w-0 flex-1 resize-none bg-transparent py-2.5 text-base outline-none placeholder:text-muted-foreground"
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
+              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                 e.preventDefault();
                 handleSend();
               }
@@ -544,13 +507,14 @@ export function ChatInput({ user }: ChatInputProps) {
             </button>
             <button
               onClick={handleSend}
+              aria-label={routing ? "Choosing the right tool" : "Send message"}
               disabled={
                 (!value.trim() && !pendingImage) ||
-                useAppStore.getState().isStreaming
+                (isStreaming || routing)
               }
               className="flex h-9 w-9 items-center justify-center rounded-full bg-primary text-primary-foreground transition disabled:opacity-40"
             >
-              <Send className="h-4 w-4" />
+              <Send className={`h-4 w-4 ${routing ? "animate-pulse" : ""}`} />
             </button>
           </div>
         </div>

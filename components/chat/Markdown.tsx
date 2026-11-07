@@ -11,7 +11,7 @@ interface MarkdownProps {
 
 export function Markdown({ content, className }: MarkdownProps) {
   return (
-    <div className={cn("prose prose-sm dark:prose-invert max-w-none", className)}>
+    <div className={cn("prose prose-sm dark:prose-invert min-w-0 max-w-none [overflow-wrap:anywhere]", className)}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
@@ -72,14 +72,14 @@ export function Markdown({ content, className }: MarkdownProps) {
             );
           },
           pre: ({ children }) => (
-            <pre className="mb-3 overflow-x-auto rounded-lg bg-black/10 p-0 dark:bg-white/10">
+            <pre className="mb-3 max-w-full overflow-x-auto rounded-lg bg-black/10 p-0 dark:bg-white/10">
               {children}
             </pre>
           ),
 
           // Tables (GFM)
           table: ({ children }) => (
-            <div className="mb-4 w-full overflow-x-auto rounded-lg border border-border">
+            <div className="mb-4 max-w-full overflow-x-auto rounded-lg border border-border">
               <table className="w-full min-w-[500px] border-collapse text-sm">
                 {children}
               </table>

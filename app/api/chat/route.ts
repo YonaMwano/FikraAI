@@ -44,7 +44,7 @@ export async function POST(req: NextRequest) {
             m.content.some((c: any) => c.type === "image_url"))
       );
 
-    if (modelPreference === "vision" || (modelPreference === "auto" && hasImage)) {
+    if (hasImage) {
       model = "qwen/qwen3.8-27b";
     }
 
@@ -110,14 +110,16 @@ export async function POST(req: NextRequest) {
 
         const decoder = new TextDecoder();
         let fullContent = "";
+        let buffer = "";
 
         try {
           while (true) {
             const { done, value } = await reader.read();
             if (done) break;
 
-            const chunk = decoder.decode(value, { stream: true });
-            const lines = chunk.split("\n").filter((line) => line.trim() !== "");
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split("\n");
+            buffer = lines.pop() || "";
 
             for (const line of lines) {
               if (line.startsWith("data: ")) {
@@ -190,7 +192,8 @@ export async function POST(req: NextRequest) {
             )
           );
         } catch (e) {
-          console.error("Stream error:", e);
+          console.error("Stream error");
+          controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ error: "Response interrupted. Please try again." })}\n\n`));
         } finally {
           controller.close();
         }

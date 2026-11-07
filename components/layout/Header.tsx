@@ -13,7 +13,7 @@ export function Header({ user, onMenuClick }: HeaderProps) {
   const { setSettingsOpen } = useAppStore();
 
   return (
-    <header className="flex h-14 items-center justify-between border-b border-border px-4">
+    <header className="flex h-14 shrink-0 items-center justify-between border-b border-border px-4">
       <button
         onClick={onMenuClick}
         className="rounded-md p-2 hover:bg-muted md:hidden"
