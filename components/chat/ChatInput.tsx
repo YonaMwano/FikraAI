@@ -498,13 +498,7 @@ export function ChatInput({ user }: ChatInputProps) {
               <FileText className="h-4 w-4 text-primary" />
               Generate Document
             </button>
-            <button
-              onClick={() => handleAttachment("upload")}
-              className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm hover:bg-muted"
-            >
-              <Upload className="h-4 w-4 text-primary" />
-              Upload Document
-            </button>
+            
           </div>
         )}
 
